@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Evcil Dost • Animasyonlu + Kıyafetli + 3 Oyun</title>
+<title>Evcil Dost • Gelişmiş v4</title>
 <style>
 :root{
   --bg1:#bfe7ff; --bg2:#f7fdff; --card:#ffffffee; --ink:#0f172a;
@@ -160,6 +160,10 @@ body{
   border:1px solid #cfd8ff; padding:.38rem .7rem;
   font-size:.8rem; font-weight:700; background:#fff;
 }
+/* YENİ: Devre dışı buton stili */
+.pillbtn:disabled{
+  background:#f1f5f9; color:#64748b; border-color:#cbd5e1; cursor:not-allowed;
+}
 
 .activityList{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;}
 .activityList button{font-size:.78rem;}
@@ -226,6 +230,46 @@ body{
 .cooldown{
   font-size:.8rem; opacity:.8; margin-top:4px;
 }
+
+/* Hafıza oyunu kartları */
+.memGrid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:6px;
+  margin-top:8px;
+}
+.memCard{
+  background:#020617;
+  border-radius:10px;
+  border:1px solid #334155;
+  height:60px;
+  display:grid;
+  place-items:center;
+  font-size:26px;
+  cursor:pointer;
+  user-select:none;
+}
+.memCard.revealed{
+  background:#111827;
+}
+.memCard.matched{
+  background:#16a34a;
+  border-color:#4ade80;
+}
+
+/* YENİ: Sıralı Tıkla Oyunu */
+.seqGrid{
+  display:grid; grid-template-columns:repeat(3,1fr);
+  gap:8px; margin-top:8px;
+}
+.seqBtn{
+  all:unset; height:70px; background:#020617; border:1px solid #334155;
+  border-radius:12px; cursor:pointer; font-size:24px; color:#fff;
+  display:grid; place-items:center; transition:background .1s, transform .1s;
+}
+.seqBtn.lit{ background:#3b82f6; transform:scale(1.05); }
+.seqBtn:active{ transform:scale(0.95); }
+.seqBtn.disabled{ background:#374151; cursor:not-allowed; }
 </style>
 </head>
 <body>
@@ -274,7 +318,7 @@ body{
           </div>
         </div>
         <div class="card">
-          <h4>Aktiviteler</h4>
+          <h4>Aktiviteler (Cooldown)</h4>
           <div id="activityList" class="activityList"></div>
         </div>
       </div>
@@ -319,10 +363,11 @@ body{
 
 <script>
 (()=>{
-  const SAVE_KEY="petGame_full_v2";
+  const SAVE_KEY="petGame_full_v4"; // Sürüm V4'e yükseltildi
+  const TICK_INTERVAL=15; // 15 saniyede bir ana stat düşüşü
 
   const SPECIES = {
-    dog:     {name:"Köpek",  emo:["🐶","🐕","🐕‍🦺","🐺"]},
+    dog:     {name:"Köpek",  emo:["🐶","🐕","🐕‍f.lux.com/🦺","🐺"]},
     cat:     {name:"Kedi",   emo:["🐱","🐈","🐈‍⬛","🦁"]},
     rabbit:  {name:"Tavşan", emo:["🐇","🐰","🐰","🦄"]},
     fox:     {name:"Tilki",  emo:["🦊","🦊","🦊","🦊"]},
@@ -331,63 +376,70 @@ body{
     bear:    {name:"Ayı",    emo:["🧸","🐻","🐻","🐻‍❄️"]},
     bird:    {name:"Kuş",    emo:["🐣","🐤","🐦","🦅"]}
   };
-  const LEVEL_THRESH=[0,120,300,600,1000,1600];
-  const STAGE_BY_LEVEL=[1,1,2,2,3,4];
+  const LEVEL_THRESH=[0,120,300,600,1000,1600,2500,4000];
+  const STAGE_BY_LEVEL=[1,1,2,2,3,3,4,4];
   const SIZE_BY_STAGE={1:72,2:96,3:120,4:138};
 
-  // Ortak aktiviteler
+  // YENİ: Cooldown (saniye) eklendi
   const ACTIVITIES_COMMON = [
-    {key:"pet",   label:"Sev",             anim:"bounce", stats:{bond:+6, fun:+4}},
-    {key:"snack", label:"Atıştırmalık",    anim:"pop",    stats:{hunger:+8, fun:+3, energy:+2}},
-    {key:"bath",  label:"Banyo",           anim:"glow",   stats:{clean:+18, fun:-2}},
-    {key:"nap",   label:"Kısa Uyku",       anim:"shake",  stats:{energy:+16, fun:-3}},
-    {key:"talk",  label:"Sohbet Et",       anim:"glow",   stats:{bond:+7, fun:+4}}
+    {key:"pet",   label:"Sev",             anim:"bounce", stats:{bond:+6, fun:+4}, cooldown:120},
+    {key:"snack", label:"Atıştırmalık",    anim:"pop",    stats:{hunger:+8, fun:+3, energy:+2}, cooldown:300},
+    {key:"bath",  label:"Banyo",           anim:"glow",   stats:{clean:+18, fun:-2}, cooldown:240},
+    {key:"nap",   label:"Kısa Uyku",       anim:"shake",  stats:{energy:+16, fun:-3}, cooldown:360},
+    {key:"talk",  label:"Sohbet Et",       anim:"glow",   stats:{bond:+7, fun:+4}, cooldown:180}
   ];
-  // Tür bazlı aktiviteler
+  // YENİ: Cooldown (saniye) ve 1 yeni aktivite eklendi
   const ACTIVITIES_SPECIES = {
     dog:[
-      {key:"fetch", label:"Top Getir",     anim:"run",   stats:{fun:+10, energy:-6, bond:+4}},
-      {key:"park",  label:"Park Koşusu",   anim:"run",   stats:{fun:+9, energy:-9, hunger:+4}},
-      {key:"trick", label:"Numara Öğret",  anim:"glow",  stats:{bond:+8, fun:+5, energy:-4}}
+      {key:"fetch", label:"Top Getir",     anim:"run",   stats:{fun:+10, energy:-6, bond:+4}, cooldown:150},
+      {key:"park",  label:"Park Koşusu",   anim:"run",   stats:{fun:+9, energy:-9, hunger:+4}, cooldown:240},
+      {key:"trick", label:"Numara Öğret",  anim:"glow",  stats:{bond:+8, fun:+5, energy:-4}, cooldown:180},
+      {key:"lazy",  label:"Tembellik",     anim:"shake", stats:{energy:+10, fun:-2}, cooldown:300}
     ],
     cat:[
-      {key:"laser", label:"Lazer Oyna",    anim:"run",   stats:{fun:+10, energy:-5}},
-      {key:"box",   label:"Kutu Keyfi",    anim:"bounce",stats:{fun:+7, bond:+3}},
-      {key:"climb", label:"Tırman",        anim:"shake", stats:{energy:-6, fun:+5, clean:-2}}
+      {key:"laser", label:"Lazer Oyna",    anim:"run",   stats:{fun:+10, energy:-5}, cooldown:150},
+      {key:"box",   label:"Kutu Keyfi",    anim:"bounce",stats:{fun:+7, bond:+3}, cooldown:180},
+      {key:"climb", label:"Tırman",        anim:"shake", stats:{energy:-6, fun:+5, clean:-2}, cooldown:200},
+      {key:"window",label:"Pencere Keyfi", anim:"glow",  stats:{fun:+8, bond:+2}, cooldown:240}
     ],
     rabbit:[
-      {key:"carrot", label:"Havuç Ziyafeti", anim:"pop",  stats:{hunger:+14, fun:+4, clean:-3}},
-      {key:"hop",    label:"Zıpla Zıpla",    anim:"bounce",stats:{fun:+8, energy:-6}},
-      {key:"burrow", label:"Tünel Kaz",      anim:"run",   stats:{fun:+5, clean:-3, energy:-4}}
+      {key:"carrot", label:"Havuç Ziyafeti", anim:"pop",  stats:{hunger:+14, fun:+4, clean:-3}, cooldown:300},
+      {key:"hop",    label:"Zıpla Zıpla",    anim:"bounce",stats:{fun:+8, energy:-6}, cooldown:150},
+      {key:"burrow", label:"Tünel Kaz",      anim:"run",   stats:{fun:+5, clean:-3, energy:-4}, cooldown:180},
+      {key:"groom",  label:"Tüy Temizle",    anim:"glow",  stats:{clean:+12, bond:+2}, cooldown:240}
     ],
     fox:[
-      {key:"stealth", label:"Gizli Gezinti", anim:"shake", stats:{fun:+8, bond:+3}},
-      {key:"chase",   label:"Kovalamaca",    anim:"run",   stats:{fun:+9, energy:-7}},
-      {key:"spin",    label:"Dönme Hareketi",anim:"pop",   stats:{fun:+6}}
+      {key:"stealth", label:"Gizli Gezinti", anim:"shake", stats:{fun:+8, bond:+3}, cooldown:180},
+      {key:"chase",   label:"Kovalamaca",    anim:"run",   stats:{fun:+9, energy:-7}, cooldown:150},
+      {key:"spin",    label:"Dönme Hareketi",anim:"pop",   stats:{fun:+6}, cooldown:120},
+      {key:"explore", label:"Keşif",         anim:"run",   stats:{fun:+7, energy:-5, bond:+3}, cooldown:240}
     ],
     panda:[
-      {key:"bamboo",  label:"Bambu Ziyafeti",anim:"pop",   stats:{hunger:+16, fun:+4, clean:-4}},
-      {key:"roll",    label:"Yuvarlanma",    anim:"bounce",stats:{fun:+9}},
-      {key:"chill",   label:"Rahatlama",     anim:"glow",  stats:{bond:+5, energy:+4}}
+      {key:"bamboo",  label:"Bambu Ziyafeti",anim:"pop",   stats:{hunger:+16, fun:+4, clean:-4}, cooldown:300},
+      {key:"roll",    label:"Yuvarlanma",    anim:"bounce",stats:{fun:+9}, cooldown:150},
+      {key:"chill",   label:"Rahatlama",     anim:"glow",  stats:{bond:+5, energy:+4}, cooldown:180},
+      {key:"meditate",label:"Meditasyon",    anim:"glow",  stats:{bond:+8, energy:+5}, cooldown:300}
     ],
     hamster:[
-      {key:"wheel",   label:"Tekerlek Koşusu",anim:"run",  stats:{energy:-10, fun:+8}},
-      {key:"stash",   label:"Yiyecek Sakla",  anim:"pop",  stats:{bond:+3, fun:+4}},
-      {key:"groom",   label:"Tüy Bakımı",     anim:"glow", stats:{clean:+10, bond:+3}}
+      {key:"wheel",   label:"Tekerlek Koşusu",anim:"run",  stats:{energy:-10, fun:+8}, cooldown:150},
+      {key:"stash",   label:"Yiyecek Sakla",  anim:"pop",  stats:{bond:+3, fun:+4}, cooldown:180},
+      {key:"groom",   label:"Tüy Bakımı",     anim:"glow", stats:{clean:+10, bond:+3}, cooldown:240},
+      {key:"maze",    label:"Labirent",       anim:"run",  stats:{fun:+9, energy:-6}, cooldown:200}
     ],
     bear:[
-      {key:"fish",  label:"Balık Avı",     anim:"run",   stats:{hunger:+14, fun:+5, energy:-6, clean:-3}},
-      {key:"roar",  label:"Kükreme",       anim:"shake", stats:{bond:+3, fun:+4}},
-      {key:"forest",label:"Orman Yürüyüşü",anim:"run",   stats:{fun:+7, energy:-6}}
+      {key:"fish",  label:"Balık Avı",     anim:"run",   stats:{hunger:+14, fun:+5, energy:-6, clean:-3}, cooldown:300},
+      {key:"roar",  label:"Kükreme",       anim:"shake", stats:{bond:+3, fun:+4}, cooldown:120},
+      {key:"forest",label:"Orman Yürüyüşü",anim:"run",   stats:{fun:+7, energy:-6}, cooldown:200},
+      {key:"honey", label:"Bal Ziyafeti",  anim:"pop",   stats:{hunger:+12, fun:+6, clean:-4}, cooldown:240}
     ],
     bird:[
-      {key:"fly",   label:"Uçuş",          anim:"run",   stats:{fun:+9, energy:-8}},
-      {key:"sing",  label:"Şarkı Söyle",   anim:"glow",  stats:{bond:+6, fun:+7}},
-      {key:"perch", label:"Dal Keyfi",     anim:"bounce",stats:{fun:+4, energy:+3}}
+      {key:"fly",   label:"Uçuş",          anim:"run",   stats:{fun:+9, energy:-8}, cooldown:150},
+      {key:"sing",  label:"Şarkı Söyle",   anim:"glow",  stats:{bond:+6, fun:+7}, cooldown:180},
+      {key:"perch", label:"Dal Keyfi",     anim:"bounce",stats:{fun:+4, energy:+3}, cooldown:120},
+      {key:"preen", label:"Tüy Düzeltme",  anim:"glow",  stats:{clean:+12, bond:+3}, cooldown:240}
     ]
   };
 
-  // Yemekler
   const FOODS = [
     {id:"food_dry",    name:"Kuru Mama 🍘",                hunger:+18, fun:+2, clean:-2, energy:+2, price:8},
     {id:"food_meat",   name:"Et/Tavuk 🍗",                 hunger:+26, fun:+4, clean:-3, energy:+4, price:15, pref:"dog"},
@@ -395,55 +447,65 @@ body{
     {id:"food_energy", name:"Enerji Atıştırmalığı ⚡",      hunger:+8,  fun:+2, clean:0,  energy:+18,price:14}
   ];
 
-  // Kıyafetler – her türe 3 adet
+  // YENİ: Her türe 1 yeni kıyafet eklendi
   const OUTFITS = {
     dog:[
       {id:"dog_bandana", label:"Kırmızı Bandana 🧣", emoji:"🧣", price:30},
       {id:"dog_hat",     label:"Şapka 🧢",          emoji:"🧢", price:40},
-      {id:"dog_glasses", label:"Güneş Gözlüğü 🕶️", emoji:"🕶️", price:45}
+      {id:"dog_glasses", label:"Güneş Gözlüğü 🕶️", emoji:"🕶️", price:45},
+      {id:"dog_bone",    label:"Altın Kemik 🦴",   emoji:"🦴", price:55}
     ],
     cat:[
-      {id:"cat_collar",  label:"Zilli Taşma 🔔",   emoji:"🔔", price:30},
+      {id:"cat_collar",  label:"Zilli Tasma 🔔",   emoji:"🔔", price:30},
       {id:"cat_bow",     label:"Pembe Fiyonk 🎀",  emoji:"🎀", price:40},
-      {id:"cat_crown",   label:"Mini Taç 👑",      emoji:"👑", price:50}
+      {id:"cat_crown",   label:"Mini Taç 👑",      emoji:"👑", price:50},
+      {id:"cat_yarn",    label:"Yün Yumak 🧶",     emoji:"🧶", price:35}
     ],
     rabbit:[
       {id:"rab_flower",  label:"Çiçek Taç 🌸",     emoji:"🌸", price:35},
       {id:"rab_scarf",   label:"Mini Atkı 🧣",     emoji:"🧣", price:30},
-      {id:"rab_hood",    label:"Kulaklı Kapşon 🐰",emoji:"🧥", price:45}
+      {id:"rab_hood",    label:"Kulaklı Kapşon 🐰",emoji:"🧥", price:45},
+      {id:"rab_carrot",  label:"Havuç Kolye 🥕",   emoji:"🥕", price:38}
     ],
     fox:[
       {id:"fox_cape",    label:"Kırmızı Pelerin 🧥",emoji:"🧥", price:45},
       {id:"fox_mask",    label:"Maske 🎭",          emoji:"🎭", price:38},
-      {id:"fox_band",    label:"Baş Bandı 🩹",      emoji:"🩹", price:30}
+      {id:"fox_band",    label:"Baş Bandı 🩹",      emoji:"🩹", price:30},
+      {id:"fox_fire",    label:"Alev Efekti 🔥",   emoji:"🔥", price:50}
     ],
     panda:[
       {id:"pan_headband",label:"Bant 🩹",           emoji:"🩹", price:30},
       {id:"pan_jacket",  label:"Mont 🧥",           emoji:"🧥", price:45},
-      {id:"pan_star",    label:"Yıldız Rozet ⭐",   emoji:"⭐", price:35}
+      {id:"pan_star",    label:"Yıldız Rozet ⭐",   emoji:"⭐", price:35},
+      {id:"pan_bamboo",  label:"Bambu Sırık 🎋",   emoji:"🎋", price:40}
     ],
     hamster:[
       {id:"ham_hood",    label:"Kapşonlu 🐭",      emoji:"🧥", price:30},
       {id:"ham_glasses", label:"Gözlük 👓",        emoji:"👓", price:35},
-      {id:"ham_hat",     label:"Mini Şapka 🎩",    emoji:"🎩", price:32}
+      {id:"ham_hat",     label:"Mini Şapka 🎩",    emoji:"🎩", price:32},
+      {id:"ham_seed",    label:"Çekirdek 🌰",      emoji:"🌰", price:38}
     ],
     bear:[
       {id:"bear_hat",    label:"Kış Şapkası 🎩",    emoji:"🎩", price:40},
       {id:"bear_scarf",  label:"Kalın Atkı 🧣",     emoji:"🧣", price:35},
-      {id:"bear_badge",  label:"Orman Rozeti 🌲",   emoji:"🌲", price:38}
+      {id:"bear_badge",  label:"Orman Rozeti 🌲",   emoji:"🌲", price:38},
+      {id:"bear_honey",  label:"Bal Kavanozu 🍯",   emoji:"🍯", price:42}
     ],
     bird:[
       {id:"bird_crown",  label:"Mini Taç 👑",      emoji:"👑", price:45},
       {id:"bird_ribbon", label:"Kuş Kurdele 🎀",   emoji:"🎀", price:35},
-      {id:"bird_star",   label:"Parlak Yıldız ⭐",  emoji:"⭐", price:32}
+      {id:"bird_star",   label:"Parlak Yıldız ⭐",  emoji:"⭐", price:32},
+      {id:"bird_note",   label:"Müzik Notası 🎵",  emoji:"🎵", price:38}
     ]
   };
 
-  // 3 Mini oyun + cooldown
+  // YENİ: 1 yeni oyun eklendi, 3 oyun zorlaştırıldı
   const GAMES = [
-    { key:"reflex",  name:"⚡ Refleks Tıkla", desc:"10 sn boyunca yeşil noktaya tıkla.", cooldown:60 },
-    { key:"timing",  name:"🎯 Zamanlama",    desc:"Bar %100'e en yakın anda durdur.",  cooldown:75 },
-    { key:"balloon", name:"🎈 Balon Patlat", desc:"Yukarı çıkan balonları tıkla.",     cooldown:70 }
+    { key:"reflex",  name:"⚡ Refleks Tıkla", desc:"(Zor) 8 sn boyunca yeşil noktaya tıkla.", cooldown:60 },
+    { key:"timing",  name:"🎯 Zamanlama",    desc:"(Zor) Bar %100'e en yakın anda durdur.",  cooldown:75 },
+    { key:"balloon", name:"🎈 Balon Patlat", desc:"(Zor) Yukarı çıkan balonları tıkla.",     cooldown:70 },
+    { key:"memory",  name:"🧠 Hafıza Kartları", desc:"Eş ikon çiftlerini bul.",        cooldown:80 },
+    { key:"sequence",name:"🔢 Sıralı Tıkla", desc:"Giderek uzayan sırayı tekrar et.", cooldown:120 }
   ];
 
   let state = {
@@ -456,6 +518,8 @@ body{
     outfits:{},
     equipped:{},
     gameCooldowns:{},
+    activityCooldowns:{}, // YENİ: Aktivite bekleme süreleri
+    slowMode:false,
     seenSelector:false,
     lastTick:Date.now()
   };
@@ -468,8 +532,31 @@ body{
   function load(){
     const raw=localStorage.getItem(SAVE_KEY);
     if(raw){
-      try{ Object.assign(state, JSON.parse(raw)); }catch(e){}
+      try{
+        const saved=JSON.parse(raw);
+        Object.assign(state,saved);
+        if(typeof state.slowMode!=="boolean") state.slowMode=false;
+        if(!state.activityCooldowns) state.activityCooldowns = {}; // Eski kayıtlar için
+      }catch(e){}
     }
+
+    // YENİ: Çevrimdışı ilerleme hesaplaması
+    const now = Date.now();
+    const elapsed = (now - (state.lastTick || now)) / 1000; // Saniye cinsinden
+    if(elapsed > 0){
+      const ticksPassed = Math.floor(elapsed / TICK_INTERVAL);
+      if(ticksPassed > 0){
+        const factor = state.slowMode ? 0.4 : 1;
+        const decayHunger = ticksPassed * 0.5 * factor;
+        const decayFun = ticksPassed * 0.3 * factor;
+        const gainEnergy = ticksPassed * 0.3 * factor;
+        state.hunger = clamp(state.hunger - decayHunger, 0, 100);
+        state.fun = clamp(state.fun - decayFun, 0, 100);
+        state.energy = clamp(state.energy + gainEnergy, 0, 100);
+        console.log(`Çevrimdışı: ${ticksPassed} tik geçti. İstatistikler güncellendi.`);
+      }
+    }
+    state.lastTick = now; // Her durumda son tick'i güncelle
   }
   function save(){
     state.lastTick=Date.now();
@@ -531,15 +618,26 @@ body{
     $("#petOutfit").textContent = outfData ? outfData.emoji : "";
   }
 
+  // YENİ: Aktivite listesini bekleme süreleriyle render et
   function renderActivities(){
     const wrap=$("#activityList");
     wrap.innerHTML="";
-    const list = [...ACTIVITIES_COMMON, ...(ACTIVITIES_SPECIES[state.species]||[])];
+    const list=[...ACTIVITIES_COMMON, ...(ACTIVITIES_SPECIES[state.species]||[])];
+    const now=Date.now();
+    
     list.forEach(act=>{
       const btn=document.createElement("button");
       btn.className="pillbtn";
-      btn.textContent=act.label;
-      btn.onclick=()=>runActivity(act);
+      
+      const until=state.activityCooldowns[act.key]||0;
+      if(until > now){
+        const secs=Math.ceil((until-now)/1000);
+        btn.textContent=act.label + ` (${secs}s)`;
+        btn.disabled=true;
+      } else {
+        btn.textContent=act.label;
+        btn.onclick=()=>runActivity(act);
+      }
       wrap.appendChild(btn);
     });
   }
@@ -560,22 +658,16 @@ body{
 
   function playActivityAnimation(type){
     const pf=$("#petFace");
-    const clsMap={
-      bounce:"anim-bounce",
-      shake:"anim-shake",
-      run:"anim-run",
-      glow:"anim-glow",
-      pop:"anim-pop"
-    };
+    const clsMap={bounce:"anim-bounce", shake:"anim-shake", run:"anim-run", glow:"anim-glow", pop:"anim-pop"};
     const cls=clsMap[type]||"anim-bounce";
     pf.classList.add(cls);
     setTimeout(()=>pf.classList.remove(cls),800);
 
     const wrap=$("#petFaceWrap");
-    const set = speciesParticles();
+    const set=speciesParticles();
     for(let i=0;i<8;i++){
       const span=document.createElement("span");
-      span.textContent = set[Math.floor(Math.random()*set.length)];
+      span.textContent=set[Math.floor(Math.random()*set.length)];
       span.style.position="absolute";
       span.style.left="50%";
       span.style.top="40%";
@@ -594,7 +686,16 @@ body{
     }
   }
 
+  // YENİ: Aktiviteyi bekleme süresiyle çalıştır
   function runActivity(act){
+    // Cooldown kontrolü (ekstra güvenlik)
+    const now = Date.now();
+    const until = state.activityCooldowns[act.key] || 0;
+    if(until > now){
+      showToast("Bu aktivite için beklemelisiniz.");
+      return;
+    }
+    
     playActivityAnimation(act.anim);
     const st=act.stats||{};
     state.hunger = clamp(state.hunger+(st.hunger||0),0,100);
@@ -602,17 +703,26 @@ body{
     state.clean  = clamp(state.clean +(st.clean ||0),0,100);
     state.energy = clamp(state.energy+(st.energy||0),0,100);
     state.bond   = clamp(state.bond  +(st.bond  ||0),0,100);
+    
+    // Cooldown ayarla
+    if(act.cooldown){
+      state.activityCooldowns[act.key] = now + act.cooldown * 1000;
+    }
+    
     levelCheck(7);
     updateBars();
+    renderActivities(); // Cooldown'u göstermek için listeyi yenile
     save();
   }
 
   function renderInventory(){
     const invFood=$("#invFood");
     invFood.innerHTML="";
+    let foodCount = 0;
     FOODS.forEach(f=>{
       const qty=state.foods[f.id]||0;
       if(qty<=0) return;
+      foodCount++;
       const d=document.createElement("div");
       d.className="item";
       d.innerHTML=`<b>${f.name}</b><div class="muted">${qty} adet</div>`;
@@ -623,36 +733,55 @@ body{
       d.appendChild(btn);
       invFood.appendChild(d);
     });
-    if(!invFood.children.length){
+    if(foodCount === 0){
       invFood.innerHTML="<div class='muted'>Hiç yemek yok.</div>";
     }
 
     const invOut=$("#invOutfits");
     invOut.innerHTML="";
     const ownedIds=state.outfits[state.species]||[];
-    if(!ownedIds.length){
+    const eq=state.equipped[state.species];
+
+    if(!ownedIds.length && !eq){
       invOut.innerHTML="<div class='muted'>Bu tür için kıyafet yok.</div>";
-    }else{
-      ownedIds.forEach(id=>{
-        const data=(OUTFITS[state.species]||[]).find(o=>o.id===id);
-        if(!data) return;
-        const d=document.createElement("div");
-        d.className="item";
-        d.innerHTML=`<b>${data.label}</b><div style="font-size:26px;margin-bottom:4px">${data.emoji}</div>`;
-        const btn=document.createElement("button");
-        btn.className="pillbtn";
-        const eq=state.equipped[state.species];
-        btn.textContent = eq===id ? "Takılı" : "Giy";
-        btn.disabled = eq===id;
-        btn.onclick=()=>{
-          state.equipped[state.species]=id;
-          save();
-          renderPet();
-          renderInventory();
-        };
-        d.appendChild(btn);
-        invOut.appendChild(d);
-      });
+    } else {
+        // YENİ: Kıyafet Çıkar butonu
+        if(eq){
+            const d=document.createElement("div");
+            d.className="item";
+            d.innerHTML=`<b>Kıyafet Çıkar</b><div style="font-size:26px;margin-bottom:4px">🚫</div>`;
+            const btn=document.createElement("button");
+            btn.className="pillbtn";
+            btn.textContent="Çıkar";
+            btn.onclick=()=>{
+                delete state.equipped[state.species];
+                save();
+                renderPet();
+                renderInventory();
+            };
+            d.appendChild(btn);
+            invOut.appendChild(d);
+        }
+
+        ownedIds.forEach(id=>{
+            const data=(OUTFITS[state.species]||[]).find(o=>o.id===id);
+            if(!data) return;
+            const d=document.createElement("div");
+            d.className="item";
+            d.innerHTML=`<b>${data.label}</b><div style="font-size:26px;margin-bottom:4px">${data.emoji}</div>`;
+            const btn=document.createElement("button");
+            btn.className="pillbtn";
+            btn.textContent = eq===id ? "Takılı" : "Giy";
+            btn.disabled = eq===id;
+            btn.onclick=()=>{
+            state.equipped[state.species]=id;
+            save();
+            renderPet();
+            renderInventory();
+            };
+            d.appendChild(btn);
+            invOut.appendChild(d);
+        });
     }
   }
 
@@ -663,8 +792,8 @@ body{
     if(f.pref && ((f.pref==="dog"&&state.species==="dog")||(f.pref==="cat"&&state.species==="cat"))) mult=1.1;
     state.hunger = clamp(state.hunger + (f.hunger||0)*mult,0,100);
     state.fun    = clamp(state.fun    + (f.fun   ||0)*mult,0,100);
-    state.clean  = clamp(state.clean  + (f.clean ||0),0,100);
-    state.energy = clamp(state.energy + (f.energy||0),0,100);
+    state.clean  = clamp(state.clean  + (f.clean ||0)*mult,0,100);
+    state.energy = clamp(state.energy + (f.energy||0)*mult,0,100);
     state.foods[f.id]=has-1;
     if(state.foods[f.id]<=0) delete state.foods[f.id];
     levelCheck(5);
@@ -763,10 +892,6 @@ body{
         btn.onclick=()=>startGame(g.key);
       }
       d.appendChild(btn);
-      const cd=document.createElement("div");
-      cd.className="cooldown";
-      cd.id="cd_"+g.key;
-      d.appendChild(cd);
       gl.appendChild(d);
     });
   }
@@ -774,10 +899,14 @@ body{
   const gameOverlay=$("#gameOverlay");
   const gameBody=$("#gameBody");
   const gameTitle=$("#gameTitle");
+  let activeGameTimer = null; // YENİ: Aktif oyun timerlarını temizlemek için
 
   $("#btnCloseGame").onclick=()=>{
     gameOverlay.style.display="none";
     gameBody.innerHTML="";
+    // YENİ: Oyundan çıkılırsa zamanlayıcıları temizle
+    if(activeGameTimer) clearInterval(activeGameTimer);
+    activeGameTimer = null;
   };
 
   function setGameCooldown(key){
@@ -789,24 +918,30 @@ body{
   }
 
   function startGame(key){
+    // YENİ: Yeni oyuna başlamadan eskisini temizle
+    if(activeGameTimer) clearInterval(activeGameTimer);
+    activeGameTimer = null;
+    
     if(key==="reflex") runReflexGame();
     else if(key==="timing") runTimingGame();
     else if(key==="balloon") runBalloonGame();
+    else if(key==="memory") runMemoryGame();
+    else if(key==="sequence") runSequenceGame(); // YENİ
   }
 
   function runReflexGame(){
     gameOverlay.style.display="flex";
     gameTitle.textContent="⚡ Refleks Tıkla";
     gameBody.innerHTML=`
-      <div>10 saniye boyunca yeşil noktaya tıkla.</div>
+      <div>(Zor) 8 saniye boyunca yeşil noktaya tıkla.</div>
       <div class="gameTarget" id="reflexArea"></div>
-      <div style="margin-top:6px;">Skor: <span id="refScore">0</span> · Kalan: <span id="refTime">10</span>s</div>`;
+      <div style="margin-top:6px;">Skor: <span id="refScore">0</span> · Kalan: <span id="refTime">8</span>s</div>`;
     const area=$("#reflexArea");
     const dot=document.createElement("div");
     dot.className="gameDot";
     dot.textContent="•";
     area.appendChild(dot);
-    let score=0, time=10;
+    let score=0, time=8; // ZORLAŞTIRILDI: 10sn -> 8sn
     const moveDot=()=>{
       const r=area.getBoundingClientRect();
       const x=Math.random()*(r.width-40);
@@ -816,15 +951,18 @@ body{
     };
     moveDot();
     dot.onclick=()=>{
-      score++;
-      $("#refScore").textContent=score;
-      moveDot();
+      if(time > 0) { // Sadece süre varken çalış
+        score++;
+        $("#refScore").textContent=score;
+        moveDot();
+      }
     };
-    const timer=setInterval(()=>{
+    activeGameTimer=setInterval(()=>{ // YENİ: Timer'ı değişkene ata
       time--;
       $("#refTime").textContent=time;
       if(time<=0){
-        clearInterval(timer);
+        clearInterval(activeGameTimer);
+        activeGameTimer = null;
         dot.onclick=null;
         finishReflex(score);
       }
@@ -851,24 +989,25 @@ body{
     gameOverlay.style.display="flex";
     gameTitle.textContent="🎯 Zamanlama";
     gameBody.innerHTML=`
-      <div>Bar %100'e en yakınken "DUR" butonuna bas.</div>
+      <div>(Zor) Bar %100'e en yakınken "DUR" butonuna bas.</div>
       <div class="gameBarOuter"><div class="gameBarInner" id="timBar"></div></div>
       <div style="margin-top:4px;">Değer: <span id="timVal">0</span>%</div>
       <button class="mbtn" id="btnStop">DUR</button>`;
     const bar=$("#timBar");
     const valTxt=$("#timVal");
     let val=0, dir=1, running=true;
-    const loop=setInterval(()=>{
+    activeGameTimer=setInterval(()=>{ // YENİ: Timer'ı değişkene ata
       if(!running) return;
-      val+=dir*4;
+      val+=dir*6; // ZORLAŞTIRILDI: Hız 4 -> 6
       if(val>=100){val=100; dir=-1;}
       if(val<=0){val=0; dir=1;}
       bar.style.width=val+"%";
       valTxt.textContent=val;
-    },80);
+    },60); // ZORLAŞTIRILDI: Aralık 80 -> 60
     $("#btnStop").onclick=()=>{
       running=false;
-      clearInterval(loop);
+      clearInterval(activeGameTimer);
+      activeGameTimer = null;
       finishTiming(val);
     };
   }
@@ -895,28 +1034,32 @@ body{
     gameOverlay.style.display="flex";
     gameTitle.textContent="🎈 Balon Patlat";
     gameBody.innerHTML=`
-      <div>Yukarı çıkan balonlara tıkla. Süre: 15 sn.</div>
+      <div>(Zor) Yukarı çıkan balonlara tıkla. Süre: 15 sn.</div>
       <div class="gameTarget" id="balArea"></div>
       <div style="margin-top:6px;">Skor: <span id="balScore">0</span> · Kalan: <span id="balTime">15</span>s</div>`;
     const area=$("#balArea");
     let score=0, time=15;
     const balloons=[];
+    let spawnTimer=null; // YENİ: Timerları temizlemek için
+    let loopId=null;
+    
     function spawnBalloon(){
       const b=document.createElement("div");
       b.className="gameDot";
       b.style.background="#3b82f6";
-      b.textContent="🎈";
+      b.textContent=Math.random()>0.5?"🎈":"⭐";
       const r=area.getBoundingClientRect();
       const x=Math.random()*(r.width-40);
       b.style.left=x+"px";
       b.style.top=(r.height-10)+"px";
       area.appendChild(b);
-      const obj={el:b,y:r.height-10,speed:50+Math.random()*60};
+      // ZORLAŞTIRILDI: Hız artırıldı
+      const obj={el:b,y:r.height-10,speed:70+Math.random()*70};
       balloons.push(obj);
       b.onclick=()=>{
         score++;
         $("#balScore").textContent=score;
-        area.removeChild(b);
+        if(b.parentNode===area) area.removeChild(b);
         const idx=balloons.indexOf(obj);
         if(idx>=0) balloons.splice(idx,1);
       };
@@ -937,21 +1080,24 @@ body{
           balloons.splice(i,1);
         }
       }
-      if(time>0) requestAnimationFrame(loop);
+      if(time>0) loopId = requestAnimationFrame(loop);
     }
-    const spawnTimer=setInterval(()=>{
+    spawnTimer=setInterval(()=>{ // YENİ: Timer'ı değişkene ata
       if(time>0) spawnBalloon();
-    },500);
-    const timer=setInterval(()=>{
+    },450); // ZORLAŞTIRILDI: Sıklık 500ms -> 450ms
+    
+    activeGameTimer=setInterval(()=>{ // YENİ: Timer'ı değişkene ata
       time--;
       $("#balTime").textContent=time;
       if(time<=0){
-        clearInterval(timer);
+        clearInterval(activeGameTimer);
+        activeGameTimer = null;
         clearInterval(spawnTimer);
+        cancelAnimationFrame(loopId);
         finishBalloon(score,area,balloons);
       }
     },1000);
-    requestAnimationFrame(loop);
+    loopId = requestAnimationFrame(loop);
   }
 
   function finishBalloon(score,area,balloons){
@@ -971,31 +1117,225 @@ body{
     },700);
   }
 
-  function openModal(build){
-    const overlay=$("#modalOverlay");
-    overlay.innerHTML="";
-    const card=document.createElement("div");
-    card.className="modal";
-    build(card,overlay);
-    overlay.appendChild(card);
-    overlay.style.display="grid";
+  function runMemoryGame(){
+    gameOverlay.style.display="flex";
+    gameTitle.textContent="🧠 Hafıza Kartları";
+    const icons=["🐶","🐱","🐰","🦊","🐼","🐹"];
+    const deck=[...icons,...icons].sort(()=>Math.random()-0.5);
+    gameBody.innerHTML=`
+      <div>İki aynı ikonu bul. Tüm çiftleri açınca ödül alıyorsun.</div>
+      <div class="memGrid" id="memGrid"></div>
+      <div style="margin-top:6px;">Bulunan çift: <span id="memPairs">0</span> / ${icons.length}</div>`;
+    const grid=$("#memGrid");
+    let first=null, lock=false, pairs=0;
+    deck.forEach((icon,idx)=>{
+      const card=document.createElement("div");
+      card.className="memCard";
+      card.dataset.icon=icon;
+      card.dataset.index=idx;
+      card.textContent="？";
+      card.onclick=()=>{
+        if(lock || card.classList.contains("matched") || card===first) return;
+        revealCard(card);
+        if(!first){
+          first=card;
+        }else{
+          lock=true;
+          if(first.dataset.icon===card.dataset.icon){
+            setTimeout(()=>{
+              first.classList.add("matched");
+              card.classList.add("matched");
+              pairs++;
+              $("#memPairs").textContent=pairs;
+              lock=false;
+              first=null;
+              if(pairs===icons.length){
+                finishMemory(pairs);
+              }
+            },350);
+          }else{
+            setTimeout(()=>{
+              hideCard(first);
+              hideCard(card);
+              lock=false;
+              first=null;
+            },550);
+          }
+        }
+      };
+      grid.appendChild(card);
+    });
   }
 
-  $("#btnChangePet").onclick=()=>openPetSelector();
-  function openPetSelector(){
+  function revealCard(card){
+    card.classList.add("revealed");
+    card.textContent=card.dataset.icon;
+  }
+  function hideCard(card){
+    card.classList.remove("revealed");
+    card.textContent="？";
+  }
+
+  function finishMemory(pairs){
+    const xp=35+pairs*4;
+    const coins=15+pairs*2;
+    levelCheck(xp);
+    state.coins+=coins;
+    $("#coins").textContent=state.coins;
+    updateBars();
+    save();
+    setGameCooldown("memory");
+    showToast("Hafıza tamam! (+"+xp+" XP, +"+coins+"⦿)");
+    setTimeout(()=>{
+      gameOverlay.style.display="none";
+      gameBody.innerHTML="";
+    },900);
+  }
+
+  // YENİ: Sıralı Tıkla Oyunu
+  function runSequenceGame(){
+    gameOverlay.style.display="flex";
+    gameTitle.textContent="🔢 Sıralı Tıkla";
+    gameBody.innerHTML=`
+      <div>Sırayı izle ve tekrarla.</div>
+      <div class="seqGrid" id="seqGrid"></div>
+      <div style="margin-top:6px;">Tur: <span id="seqLevel">1</span> · Skor: <span id="seqScore">0</span></div>
+      <div id="seqStatus" class="muted" style="margin-top:4px; height: 1.2em;">Sırayı izle...</div>
+    `;
+    const grid=$("#seqGrid");
+    const status=$("#seqStatus");
+    const btns=[];
+    for(let i=0;i<9;i++){
+      const btn=document.createElement("button");
+      btn.className="seqBtn";
+      btn.dataset.index=i;
+      btn.textContent=i+1;
+      grid.appendChild(btn);
+      btns.push(btn);
+    }
+    
+    let sequence = [];
+    let playerSequence = [];
+    let level = 0;
+    let score = 0;
+    let playerTurn = false;
+    
+    function setPlayerTurn(isTurn){
+      playerTurn = isTurn;
+      status.textContent = isTurn ? "Sıra sende!" : "Sırayı izle...";
+      btns.forEach(b=>b.classList.toggle("disabled", !isTurn));
+    }
+    
+    function flashButton(index){
+      const btn=btns[index];
+      btn.classList.add("lit");
+      setTimeout(()=>btn.classList.remove("lit"), 350);
+    }
+    
+    async function playSequence(){
+      setPlayerTurn(false);
+      await new Promise(r=>setTimeout(r,500));
+      for(const index of sequence){
+        flashButton(index);
+        await new Promise(r=>setTimeout(r,500));
+      }
+      setPlayerTurn(true);
+      playerSequence = [];
+    }
+    
+    function nextLevel(){
+      level++;
+      $("#seqLevel").textContent=level;
+      sequence.push(Math.floor(Math.random()*9));
+      playSequence();
+    }
+    
+    btns.forEach(btn=>{
+      btn.onclick=()=>{
+        if(!playerTurn) return;
+        const index = parseInt(btn.dataset.index);
+        flashButton(index);
+        playerSequence.push(index);
+        
+        const i = playerSequence.length - 1;
+        if(playerSequence[i] !== sequence[i]){
+          // Hata
+          setPlayerTurn(false);
+          status.textContent = "Yanlış sıra! Oyun bitti.";
+          finishSequence(score);
+          return;
+        }
+        
+        score += 5;
+        $("#seqScore").textContent = score;
+        
+        if(playerSequence.length === sequence.length){
+          // Tur tamam
+          score += 20;
+          $("#seqScore").textContent = score;
+          nextLevel();
+        }
+      }
+    });
+    
+    nextLevel();
+  }
+
+  function finishSequence(score){
+    const xp=20+Math.round(score*0.5);
+    const coins=10+Math.round(score*0.2);
+    levelCheck(xp);
+    state.coins+=coins;
+    $("#coins").textContent=state.coins;
+    updateBars();
+    save();
+    setGameCooldown("sequence");
+    showToast("Sıra skoru: "+score+" (+"+xp+" XP, +"+coins+"⦿)");
+    setTimeout(()=>{
+      gameOverlay.style.display="none";
+      gameBody.innerHTML="";
+    },1200);
+  }
+
+  // --- MODAL FONKSİYONLARI ---
+
+  // !!!!! ÖNEMLİ HATA DÜZELTMESİ !!!!!
+  // Orijinal kodda 'build' fonksiyonu 'appendChild'dan ÖNCE çağrılıyordu.
+  // Bu, 'build' içindeki $(...) seçicilerinin başarısız olmasına ve kodun çökmesine neden oluyordu.
+  // Düzeltilmiş sırada: Önce kart DOM'a eklenir, sonra 'build' çağrılır.
+  function openModal(build){
+    const overlay=$("#modalOverlay");
+    overlay.innerHTML=""; // Önce temizle
+    const card=document.createElement("div");
+    card.className="modal";
+    overlay.appendChild(card); // 1. KARTI EKLE
+    overlay.style.display="grid"; // 2. GÖRÜNÜR YAP
+    build(card,overlay); // 3. ŞİMDİ İÇİNİ DOLDUR (artık seçiciler çalışır)
+  }
+
+  // YENİ: Seçim kilidi mantığı eklendi
+  $("#btnChangePet").onclick=()=>openPetSelector(false);
+
+  function openPetSelector(isFirstTime = false){
     openModal((card,overlay)=>{
       card.innerHTML=`
         <div class="mrow">
-          <h3>Evcil Hayvan Seç</h3>
+          <h3>${isFirstTime ? "Yeni Evcil Hayvan" : "Hayvan Değiştir"}</h3>
           <button class="mbtn" id="closeSel">Kapat</button>
         </div>
+        ${isFirstTime ? "<div class='muted' style='margin-bottom:8px'>Oyununa başlamak için bir tür seç ve isim ver. Bu seçim daha sonra değiştirilemez!</div>" : ""}
         <div class="choice" id="petChoices"></div>
         <div class="mrow" style="margin-top:8px;">
           <span>İsim:</span>
           <input type="text" id="petNameInput" value="${state.name}">
           <button class="mbtn" id="btnSelSave">Kaydet</button>
         </div>`;
-      $("#closeSel").onclick=()=>{overlay.style.display="none"; overlay.innerHTML="";};
+      
+      const closeBtn = $("#closeSel");
+      closeBtn.onclick=()=>{overlay.style.display="none"; overlay.innerHTML="";};
+      // İlk seçimde kapatma butonu olmaz
+      if(isFirstTime) closeBtn.style.display = "none";
+      
       const pc=$("#petChoices");
       Object.entries(SPECIES).forEach(([key,val])=>{
         const d=document.createElement("div");
@@ -1009,17 +1349,24 @@ body{
         };
         pc.appendChild(d);
       });
+
       $("#btnSelSave").onclick=()=>{
         const active=$("#petChoices .opt.active");
         const key=active?active.dataset.key:state.species;
         const nm=$("#petNameInput").value.trim()||"Dost";
         state.species=key;
         state.name=nm;
+        state.seenSelector=true; // YENİ: Seçim yapıldı
+        
         renderPet();
         renderActivities();
         renderInventory();
         renderShop();
         save();
+        
+        // YENİ: Seçim yapıldığı için değiştir butonunu gizle
+        $("#btnChangePet").style.display = "none";
+        
         overlay.style.display="none"; overlay.innerHTML="";
       };
     });
@@ -1034,12 +1381,45 @@ body{
           <button class="mbtn" id="closeSet">Kapat</button>
         </div>
         <div class="card" style="background:#111827;border-color:#1f2937;margin-top:6px;">
+          <h4>Oyun Ayarları</h4>
+          <div class="muted">Rahat modda açlık/azalma daha yavaş işler.</div>
+          <div class="mrow" style="margin-top:6px;">
+            <span>Rahat mod:</span>
+            <button class="mbtn" id="btnSlowMode"></button>
+          </div>
+          <div class="muted" style="margin-top:10px;">Hayvan seçiminizi değiştirmek veya baştan başlamak için ilerlemeyi silin.</div>
+          <div class="mrow" style="margin-top:6px;">
+            <span>Kaydı sıfırla:</span>
+            <button class="mbtn" id="btnResetSave" style="background:#b91c1c;border-color:#f87171;">Tüm ilerlemeyi sil</button>
+          </div>
+        </div>
+        <div class="card" style="background:#111827;border-color:#1f2937;margin-top:8px;">
           <h4>Bilgi</h4>
-          <div class="muted">Bu sürümde: tür seçimi, çoklu animasyonlu aktiviteler, türlere özel kıyafetler, 3 mini oyun ve oyun başına bekleme süresi bulunuyor.</div>
+          <div class="muted">Bu sürüm: tür seçimi (kilitli), çoklu animasyonlu aktiviteler (cooldown'lu), türlere özel kıyafetler ve 5 mini oyun (Refleks, Zamanlama, Balon, Hafıza, Sıralı Tıkla) içerir. Çevrimdışı ilerleme desteklenir.</div>
         </div>`;
       $("#closeSet").onclick=()=>{overlay.style.display="none"; overlay.innerHTML="";};
+      
+      const btnSlow=$("#btnSlowMode");
+      const refreshSlow=()=>{
+        btnSlow.textContent = state.slowMode ? "Açık" : "Kapalı";
+      };
+      refreshSlow();
+      btnSlow.onclick=()=>{
+        state.slowMode=!state.slowMode;
+        refreshSlow();
+        save();
+      };
+      
+      $("#btnResetSave").onclick=()=>{
+        if(confirm("Tüm ilerlemeyi silmek istediğinize emin misiniz? Hayvan seçiminiz dahil her şey sıfırlanacak.")){
+          localStorage.removeItem(SAVE_KEY);
+          location.reload();
+        }
+      };
     });
   }
+
+  // --- SEKME VE ANA DÖNGÜLER ---
 
   $$("#tabs .tabbtn").forEach(btn=>{
     btn.onclick=()=>{
@@ -1049,39 +1429,52 @@ body{
       if(id==="inventory") renderInventory();
       if(id==="shop") renderShop();
       if(id==="games") renderGames();
+      if(id==="home") renderActivities(); // YENİ: Cooldown'ları yenilemek için
     };
   });
 
+  // Ana oyun döngüsü (Stat düşüşü)
   setInterval(()=>{
-    state.hunger=clamp(state.hunger-0.5,0,100);
-    state.fun   =clamp(state.fun-0.3,0,100);
-    state.energy=clamp(state.energy+0.3,0,100);
+    const factor = state.slowMode ? 0.4 : 1;
+    state.hunger=clamp(state.hunger-0.5*factor,0,100);
+    state.fun   =clamp(state.fun-0.3*factor,0,100);
+    state.energy=clamp(state.energy+0.3*factor,0,100); // Enerji yavaşça dolar
     updateBars();
     save();
-  },15000);
+  }, TICK_INTERVAL * 1000); // 15 saniye
 
-  setInterval(()=>{ renderGames(); },5000);
+  // Cooldown'ları güncellemek için periyodik render
+  setInterval(()=>{ 
+    renderGames(); 
+    // Sadece "home" sekmesi açıksa render et (performans)
+    if($("#home").classList.contains("active")) {
+      renderActivities(); 
+    }
+  }, 1000); // 1 saniyede bir
 
   $("#petFace").onclick=()=>{
-    state.bond=clamp(state.bond+4,0,100);
-    state.fun =clamp(state.fun+3,0,100);
-    levelCheck(4);
+    // "Sev" aktivitesinin kısa bir versiyonu, ama cooldown'a takılmıyor
+    state.bond=clamp(state.bond+2,0,100); // Daha az bağ
+    state.fun =clamp(state.fun+1,0,100); // Daha az neşe
+    levelCheck(2); // Daha az XP
     updateBars();
     playActivityAnimation("bounce");
     save();
   };
 
-  // Boot
+  // --- BAŞLAT ---
   load();
   $("#coins").textContent=state.coins;
   renderPet();
   updateBars();
   renderActivities();
   renderGames();
+  
+  // YENİ: İlk çalıştırma ve seçim kilidi
   if(!state.seenSelector){
-    state.seenSelector=true;
-    save();
-    openPetSelector();
+    openPetSelector(true); // true = Bu ilk seçim, kilitlenecek
+  } else {
+    $("#btnChangePet").style.display = "none"; // Önceden seçim yapıldıysa butonu gizle
   }
 })();
 </script>

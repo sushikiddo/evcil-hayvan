@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Animasyonlu Pet v2.1 (Hata Korumalı)</title>
+<style>
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #e0e8f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+    color: #333;
+  }
+  h2 { margin-bottom: 10px; }
+
+  #gameContainer {
+    position: relative;
+    width: 500px;
+    margin-top: 20px;
+  }
+
+  canvas {
+    background: #87CEEB; /* Gökyüzü mavisi - resim yoksa bile görünür */
+    border-radius: 12px;
+    border: 4px solid #fff;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+    display: block;
+  }
+
+  /* Barlar */
+  .hud {
+    position: absolute; top: 10px; left: 10px; right: 10px;
+    display: flex; gap: 10px;
+  }
+  .stat-box { background: rgba(255,255,255,0.9); padding: 5px 10px; border-radius: 8px; flex: 1; }
+  .stat-label { font-size: 0.75rem; font-weight: bold; display: block; margin-bottom: 3px; }
+  .bar-bg { background: #ccc; height: 8px; border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; width: 100%; transition: width 0.3s; }
+  
+  .fill-hunger { background: #ff9f43; }
+  .fill-fun { background: #ff6b6b; }
+  .fill-energy { background: #2e86de; }
+
+  /* Kontroller */
+  .controls {
+    margin-top: 20px;
+    display: flex;
+    gap: 15px;
+    background: white;
+    padding: 15px;
+    border-radius: 16px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+  }
+  .btn {
+    all: unset; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 10px; min-width: 60px;
+    border-radius: 8px; background: #f8f9fa; border: 1px solid #dee2e6;
+    transition: 0.2s;
+  }
+  .btn:hover { background: #e9ecef; transform: translateY(-2px); }
+  .btn:active { transform: scale(0.95); }
+  .btn-icon { font-size: 1.5rem; margin-bottom: 5px; }
+  .btn-text { font-size: 0.85rem; font-weight: bold; }
+
+  /* Durum Mesajı */
+  #statusArea {
+    margin-top: 15px;
+    font-size: 0.9rem;
+    color: #555;
+    background: #fff;
+    padding: 10px;
+    border-radius: 8px;
+    max-width: 480px;
+    text-align: center;
+    border: 1px solid #ddd;
+  }
+</style>
+</head>
+<body>
+
+  <h2>🐕 Animasyonlu Dostum</h2>
+
+  <div id="gameContainer">
+    <div class="hud">
+      <div class="stat-box">
+        <span class="stat-label">Açlık</span>
+        <div class="bar-bg"><div id="barHunger" class="bar-fill fill-hunger"></div></div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Neşe</span>
+        <div class="bar-bg"><div id="barFun" class="bar-fill fill-fun"></div></div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Enerji</span>
+        <div class="bar-bg"><div id="barEnergy" class="bar-fill fill-energy"></div></div>
+      </div>
+    </div>
+
+    <canvas id="gameCanvas" width="500" height="300"></canvas>
+  </div>
+
+  <div class="controls">
+    <button id="btnPet" class="btn" onclick="interact('pet')">
+      <span class="btn-icon">👋</span><span class="btn-text">Sev</span>
+    </button>
+    <button id="btnFeed" class="btn" onclick="interact('feed')">
+      <span class="btn-icon">🍖</span><span class="btn-text">Besle</span>
+    </button>
+    <button id="btnSleep" class="btn" onclick="interact('sleep')">
+      <span class="btn-icon">💤</span><span class="btn-text">Uyu</span>
+    </button>
+  </div>
+
+  <div id="statusArea">Oyun yükleniyor...</div>
+
+<script>
+/**
+ * V2.1 GÜNCELLEMESİ:
+ * - Hata toleransı eklendi. Resim yoksa oyun çökmez, kutu çizer.
+ * - Ses yüklenemezse oyun çökmez, sessiz devam eder.
+ * - "spritesheet_brown.png" için kare ayarları düzeltildi.
+ */
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const statusArea = document.getElementById('statusArea');
+
+// --- AYARLAR ---
+const CONFIG = {
+  decay: 0.05, // Stat azalma hızı
+  assetPath: {
+    img: './kopek.png',
+    snd: './havlama.wav'
+  }
+};
+
+// --- DURUM (STATE) ---
+let game = {
+  hunger: 80, fun: 80, energy: 80,
+  action: 'idle', // idle, happy, sleep, eating
+  isSleeping: false,
+  messages: [], // Uçan yazılar
+  assetsLoaded: false,
+  imgError: false // Resim yüklenemedi mi?
+};
+
+// --- SPRITE AYARLARI (Doğru PNG için) ---
+// spritesheet_brown.png genellikle 32x32 karelerden oluşur.
+// 0,1,2,3: Idle/Walk varyasyonları
+// 4,5,6,7: Run/Jump varyasyonları (Genelde alt satırlarda olur ama bu sheet tek satırsa dikkat)
+// *Varsayım*: İndirilen sheet tek satır ve kareler 32x32.
+const SPRITE = {
+  w: 32, h: 32,
+  scale: 5,
+  anims: {
+    // Deneme yanılma ile kareleri bulacağız.
+    // Genelde: 0-3 arası duruş/yürüme, sonraki kareler aksiyon.
+    'idle':   { frames: [0, 1], speed: 40, loop: true }, 
+    'happy':  { frames: [2, 3], speed: 15, loop: true }, // Kuyruk sallama
+    'eating': { frames: [2, 3], speed: 10, loop: true }, // Hızlı kuyruk (yemek)
+    'sleep':  { frames: [5, 6], speed: 80, loop: true }  // Yatış pozisyonu (tahmini)
+  }
+};
+
+// --- VARLIKLAR ---
+const img = new Image();
+const snd = new Audio();
+
+// --- YÜKLEME ---
+function init() {
+  statusArea.innerHTML = "Dosyalar aranıyor... (kopek.png, havlama.wav)";
+  
+  // Resmi Yükle
+  img.src = CONFIG.assetPath.img;
+  img.onload = () => {
+    game.assetsLoaded = true;
+    statusArea.innerHTML = "✅ Oyun Hazır! (Resim yüklendi)";
+    startGame();
+  };
+  img.onerror = () => {
+    game.imgError = true;
+    statusArea.innerHTML = "⚠️ Resim (kopek.png) BULUNAMADI! Kare olarak oynatılıyor.";
+    statusArea.style.color = "red";
+    startGame(); // Resim olmasa da başlat
+  };
+
+  // Sesi Yükle (Hata verirse önemseme)
+  snd.src = CONFIG.assetPath.snd;
+}
+
+function startGame() {
+  requestAnimationFrame(loop);
+}
+
+// --- OYUN DÖNGÜSÜ ---
+let tick = 0;
+let frameIdx = 0;
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function update() {
+  // Statları düşür
+  if(!game.isSleeping) {
+    game.hunger = Math.max(0, game.hunger - CONFIG.decay * 0.8);
+    game.fun    = Math.max(0, game.fun    - CONFIG.decay * 1.0);
+    game.energy = Math.max(0, game.energy - CONFIG.decay * 0.5);
+  } else {
+    game.energy = Math.min(100, game.energy + 0.2);
+    game.hunger = Math.max(0, game.hunger - 0.05);
+    if(game.energy >= 100) wakeUp();
+  }
+
+  // Animasyon Sayacı
+  const anim = SPRITE.anims[game.action];
+  tick++;
+  if(tick > anim.speed) {
+    tick = 0;
+    frameIdx++;
+    if(frameIdx >= anim.frames.length) {
+      frameIdx = 0;
+      // Döngü değilse (tek seferlikse) idle'a dön
+      if(!anim.loop) setAction('idle');
+    }
+  }
+
+  // Uçan yazıları güncelle
+  for(let i=game.messages.length-1; i>=0; i--){
+    let m = game.messages[i];
+    m.y -= 1; m.life--;
+    if(m.life <= 0) game.messages.splice(i,1);
+  }
+
+  // HTML Barlarını Güncelle
+  document.getElementById('barHunger').style.width = game.hunger + "%";
+  document.getElementById('barFun').style.width = game.fun + "%";
+  document.getElementById('barEnergy').style.width = game.energy + "%";
+}
+
+function draw() {
+  // Temizle
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Yer/Gölge
+  ctx.fillStyle = "rgba(0,0,0,0.1)";
+  ctx.beginPath();
+  ctx.ellipse(canvas.width/2, canvas.height/2 + 60, 50, 10, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // KARAKTER ÇİZİMİ
+  if (game.assetsLoaded && !game.imgError) {
+    // RESİM VARSA: Sprite çiz
+    const anim = SPRITE.anims[game.action];
+    // Sprite sheet'in dışına çıkmamak için güvenli frame seçimi
+    const safeFrame = anim.frames[frameIdx] % 10; // (Örnek koruma)
+    
+    const sx = safeFrame * SPRITE.w;
+    const sy = 0;
+    const dw = SPRITE.w * SPRITE.scale;
+    const dh = SPRITE.h * SPRITE.scale;
+    const dx = (canvas.width - dw) / 2;
+    const dy = (canvas.height - dh) / 2 + 10;
+
+    try {
+        ctx.drawImage(img, sx, sy, SPRITE.w, SPRITE.h, dx, dy, dw, dh);
+    } catch(e) {
+        // Çizim hatası olursa (örneğin resim boyutları uymazsa)
+        ctx.fillStyle = "red";
+        ctx.fillText("Sprite Hatası", canvas.width/2 - 40, canvas.height/2);
+    }
+
+  } else {
+    // RESİM YOKSA: Kutu çiz (Fallback)
+    ctx.fillStyle = game.isSleeping ? "#555" : "#e67e22"; // Uyuyorsa gri, değilse turuncu
+    const size = 80;
+    const x = canvas.width/2 - size/2;
+    const y = canvas.height/2 - size/2;
+    
+    // Zıplama efekti (kutu modu için)
+    const bounce = (game.action === 'happy' || game.action === 'eating') ? Math.sin(Date.now()/100)*5 : 0;
+    
+    ctx.fillRect(x, y + bounce, size, size);
+    
+    // Gözler
+    ctx.fillStyle = "white";
+    if(!game.isSleeping) {
+        ctx.fillRect(x + 15, y + 20 + bounce, 15, 15);
+        ctx.fillRect(x + 50, y + 20 + bounce, 15, 15);
+        ctx.fillStyle = "black"; // Göz bebekleri
+        ctx.fillRect(x + 20, y + 25 + bounce, 5, 5);
+        ctx.fillRect(x + 55, y + 25 + bounce, 5, 5);
+    } else {
+        ctx.fillText("Zzz...", x + size/2 - 10, y - 10);
+    }
+  }
+
+  // Uçan Yazılar
+  ctx.font = "bold 18px sans-serif";
+  ctx.textAlign = "center";
+  game.messages.forEach(m => {
+    ctx.fillStyle = m.color;
+    ctx.fillText(m.text, m.x, m.y);
+  });
+}
+
+// --- ETKİLEŞİM ---
+function interact(type) {
+  // Eğer uyuyorsa ve uyandırmıyorsak, işlem yapma
+  if(game.isSleeping && type !== 'sleep') {
+    spawnMsg("Şşşt! Uyuyor...", "#555");
+    return;
+  }
+
+  if(type === 'pet') {
+    game.fun = Math.min(100, game.fun + 10);
+    setAction('happy');
+    spawnMsg("❤️ Sevildi!", "#ff6b6b");
+    playSound();
+    setTimeout(() => { if(!game.isSleeping) setAction('idle'); }, 2000);
+  } 
+  else if(type === 'feed') {
+    game.hunger = Math.min(100, game.hunger + 20);
+    setAction('eating');
+    spawnMsg("🍖 Ham hum!", "#ff9f43");
+    setTimeout(() => { if(!game.isSleeping) setAction('idle'); }, 1500);
+  } 
+  else if(type === 'sleep') {
+    if(game.isSleeping) wakeUp();
+    else goToSleep();
+  }
+}
+
+function setAction(act) {
+  if(game.action === act) return;
+  game.action = act;
+  frameIdx = 0;
+  tick = 0;
+}
+
+function goToSleep() {
+  game.isSleeping = true;
+  setAction('sleep');
+  document.querySelector('#btnSleep .btn-text').innerText = "Uyan";
+  spawnMsg("İyi geceler 🌙", "#6c5ce7");
+}
+
+function wakeUp() {
+  game.isSleeping = false;
+  setAction('idle');
+  document.querySelector('#btnSleep .btn-text').innerText = "Uyu";
+  spawnMsg("Günaydın! ☀️", "#f1c40f");
+}
+
+function spawnMsg(text, color) {
+  game.messages.push({
+    text: text, color: color,
+    x: canvas.width/2 + (Math.random()*40 - 20),
+    y: canvas.height/2 - 60,
+    life: 60
+  });
+}
+
+function playSound() {
+  // Ses hatası oyun durdurmasın diye try-catch
+  try {
+    if(snd.readyState >= 2) {
+        snd.currentTime = 0;
+        snd.play().catch(e => console.log("Ses çalma engellendi (tarayıcı kısıtlaması)"));
+    }
+  } catch(e) {}
+}
+
+// Başlat
+init();
+
+</script>
+</body>
+</html>
